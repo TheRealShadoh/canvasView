@@ -1,84 +1,3 @@
-function Get-RFJob {
-    <#
-    .Synopsis
-    Retrieves list of iDRAC jobs, Id, Name, JobState
-    .DESCRIPTION
-    Modified version of GetDeleteJobQueueREDFISH.py (Dell iDRAC-Redfish-Scripting)
-    Accepts get-credential for the -Credentials parameter.
-    .EXAMPLE
-    Below example will prompt for the password of the user root.
-        Get-RFJob -ComputerName 192.168.1.10 -Credential root
-
-    Below example will accept get-credential information and not prompt.
-        $creds = Get-Credential
-        Get-RFJob -ComputerName 192.168.1.10 -Credential $creds
-    #>
-    param(
-        [Parameter(Mandatory = $True)]
-        $ComputerName,
-        [Parameter(Mandatory = $True)]
-        [System.Management.Automation.PSCredential]$Credential,
-        $Id
-    )
-
-    Set-IgnoreSSLCertificates
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::TLS12
-    # URI setting
-    $uri = "https://$ComputerName/redfish/v1/Managers/iDRAC.Embedded.1/Jobs"
-
-
-    if ($Id -ne $null) {
-        #region Retrieve single job
-        $resultArray = @()
-        try {
-            $RawResult = Invoke-WebRequest -Uri "$uri/$Id" -Credential $credential -Method Get -ContentType 'application/json' -ErrorVariable RespErr -Headers @{"Accept" = "application/json" } -UseBasicParsing
-        }
-        catch {
-            Write-Host
-            $RespErr
-            return
-        }
-
-        if ($RawResult.StatusCode -eq 200) {
-            $RawResult = $RawResult.Content | ConvertFrom-Json
-            $resultArray += $RawResult
-        }
-        else {
-            Write-Warning "REDFISH request failed"
-        }
-
-        $resultArray
-        #endregion
-    }
-    else {
-        #region Retrieve all jobs
-        $resultArray = @()
-        try {
-            $RawResult = Invoke-WebRequest -Uri "$uri" -Credential $credential -Method Get -ContentType 'application/json' -ErrorVariable RespErr -Headers @{"Accept" = "application/json" } -UseBasicParsing
-        }
-        catch {
-            Write-Host
-            $RespErr
-            return
-        }
-
-        if ($RawResult.StatusCode -eq 200) {
-            $RawResult = $RawResult.Content | ConvertFrom-Json
-            foreach ($result in $RawResult.members) {
-                $ResultID = ($result."@odata.id" -split "/")[-1]
-                $SingleResult = Invoke-WebRequest -Uri "$uri/$ResultID" -Credential $credential -Method Get -ContentType 'application/json' -ErrorVariable RespErr -Headers @{"Accept" = "application/json" } -UseBasicParsing
-                $SingleResult = $SingleResult.content | ConvertFrom-Json
-                $resultArray += $SingleResult
-            }
-        }
-        else {
-            Write-Warning "REDFISH request failed"
-        }
-
-        $resultArray
-    }
-    #endregion
-}
 Function Get-CanvasToken {
     <#
     .Synopsis
@@ -180,8 +99,7 @@ function Get-CanvasCourses {
     $headers.Add("Accept", "application/json")
     $headers.Add("Authorization", "Bearer $AuthToken")
     $Body = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
-    $Body.Add("include", "term")
-
+    $Body.Add("include", @("term","syllabus_body","current_grading_period_scores"))
 
     $resultArray = @()
     try {
@@ -414,16 +332,69 @@ function Get-CanvasInfo {
                 $assignmentObject = [PSCustomObject]@{
                     Class = $course.Name
                     Title = $_.plannable.title
+                    Details = $null
                     AssignmentID = $_.plannable.id
+                    DueDate = $_.plannable.due_at
                     Submitted = $_.submissions.submitted
                     Graded = $_.submissions.graded
                     Late = $_.submissions.late
+                    Link = $null
                 }
+                if($assignmentObject.dueDate){
+                    $assignmentObject.dueDate = [datetime]$assignmentObject.dueDate
+                }
+                $details = Get-CanvasAssignmentDetails -CanvasURL $CanvasURL -AuthToken $AuthToken -AssignmentURL $_.html_url
+                $assignmentObject.link = $details.html_url
+                $assignmentObject.Details = $details.message
                 $hash.Courses.$($course.name)."Assignments".add($assignmentObject)
             }
         }
     }
 
     return $hash
+}
+
+function Get-CanvasAssignmentDetails {
+    <#
+        .Synopsis
+        .DESCRIPTION
+        .EXAMPLE
+        #>
+    param(
+        [Parameter(Mandatory = $True)]
+        $CanvasURL,
+        $AuthToken,
+        $AssignmentURL
+    )
+
+    #Set-IgnoreSSLCertificates
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::TLS12
+    # URI setting
+    $uri = "$CanvasURL/api/v1$AssignmentURL"
+    $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+    $headers.Add("Accept", "application/json")
+    $headers.Add("Authorization", "Bearer $AuthToken")
+    $Body = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+
+    $resultArray = @()
+    try {
+        $RawResult = Invoke-WebRequest -Uri "$uri" -Method Get -ContentType 'application/json' -ErrorVariable RespErr -Body $Body -Headers $headers -UseBasicParsing
+    }
+    catch {
+        Write-Host
+        $RespErr
+        return
+    }
+
+    if ($RawResult.StatusCode -eq 200) {
+        $RawResult = $RawResult.Content | ConvertFrom-Json
+        $resultArray += $RawResult
+    }
+    else {
+        Write-Warning "Request failed"
+    }
+
+    return $resultArray
 
 }
+

@@ -15,4 +15,6 @@ $info.courses.keys
 $nl
 Write-Host "Assignments" -ForegroundColor Yellow
 $nl
-$info.courses.GetEnumerator() | % {$_.value.assignments} | Format-Table -AutoSize
+$page = $info.courses.GetEnumerator() | % {$_.value.assignments} | Sort-Object -Property DueDate | ConvertTo-Html
+$page | Out-File .\page.html -Force
+Invoke-Item .\page.html
